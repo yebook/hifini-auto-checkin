@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ACCOUNTS: ${{ secrets.ACCOUNTS }}
-      MT_ACCOUNTS: ${{ secrets.MT_ACCOUNTS }}
 
     steps:
       - uses: actions/checkout@v4
