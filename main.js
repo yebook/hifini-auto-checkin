@@ -26,19 +26,34 @@ const sites = {
 
   binmt: {
     name: "BinMT",
+    preUrl: "https://bbs.binmt.cc/k_misign-sign.html",
     signUrl:
-      "https://www.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=json",
+      "https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&infloat=1&inajax=1&ajaxtarget=midaben_sign",
     method: "GET",
     headers: (cookie) => ({
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://bbs.binmt.cc/k_misign-sign.html",
       Cookie: cookie
     }),
     parseResult: async (res) => {
-      const json = await res.json();
-      if (json.status === 0) return { ok: true, msg: json.msg };
-      if (json.msg?.includes("已签到")) return { ok: true, msg: json.msg };
-      return { ok: false, msg: json.msg || "签到失败" };
+      const text = await res.text();
+      // 如果返回 HTML，则 Cookie 可能无效
+      if (text.startsWith("<")) {
+        return {
+          ok: false,
+          msg: "返回 HTML 页面，Cookie 失效或未登录"
+        };
+      }
+      try {
+        const json = JSON.parse(text);
+        if (json.status === 0) return { ok: true, msg: json.msg };
+        if (json.msg?.includes("已签到")) return { ok: true, msg: json.msg };
+        return { ok: false, msg: json.msg || "签到失败" };
+      } catch (err) {
+        return { ok: false, msg: "返回内容无法解析为 JSON" };
+      }
     }
   }
 };
@@ -47,14 +62,22 @@ const sites = {
 // 执行签到
 // =======================
 
-async function checkIn(account) {
-  const siteCfg = sites[account.site];
+async function checkIn(account, siteKey) {
+  const siteCfg = sites[siteKey];
 
   if (!siteCfg) {
-    throw new Error(`未知站点：${account.site}`);
+    throw new Error(`未知站点：${siteKey}`);
   }
 
   console.log(`【${account.name} | ${siteCfg.name}】: 开始签到...`);
+
+  // 如果有 preUrl，先访问一次
+  if (siteCfg.preUrl) {
+    await fetch(siteCfg.preUrl, {
+      method: "GET",
+      headers: siteCfg.headers(account.cookie)
+    });
+  }
 
   const response = await fetch(siteCfg.signUrl, {
     method: siteCfg.method,
@@ -80,28 +103,47 @@ async function checkIn(account) {
 // =======================
 
 async function main() {
-  let accounts;
-
+  // 处理 HiFiTi 账号
+  let hifitiAccounts = [];
   if (process.env.ACCOUNTS) {
     try {
-      accounts = JSON.parse(process.env.ACCOUNTS);
-    } catch (error) {
+      hifitiAccounts = JSON.parse(process.env.ACCOUNTS);
+    } catch (err) {
       console.log("❌ ACCOUNTS 格式错误");
       process.exit(1);
     }
-  } else {
-    console.log("❌ 未配置 ACCOUNTS");
+  }
+
+  // 处理 MT 账号
+  let mtAccounts = [];
+  if (process.env.MT_ACCOUNTS) {
+    try {
+      mtAccounts = JSON.parse(process.env.MT_ACCOUNTS);
+    } catch (err) {
+      console.log("❌ MT_ACCOUNTS 格式错误");
+      process.exit(1);
+    }
+  }
+
+  const tasks = [
+    ...hifitiAccounts.map((acc) => checkIn(acc, "hifiti")),
+    ...mtAccounts.map((acc) => checkIn(acc, "binmt"))
+  ];
+
+  if (tasks.length === 0) {
+    console.log("❌ 未配置任何账号信息");
     process.exit(1);
   }
 
-  const all = accounts.map(checkIn);
-  const results = await Promise.allSettled(all);
+  const results = await Promise.allSettled(tasks);
 
   console.log(`\n======== 签到结果 ========\n`);
   let hasError = false;
 
+  let allAccounts = [...hifitiAccounts.map(a => ({...a, site:'hifiti'})), ...mtAccounts.map(a => ({...a, site:'binmt'}))];
+
   results.forEach((result, index) => {
-    const acc = accounts[index];
+    const acc = allAccounts[index];
     if (result.status === "fulfilled") {
       console.log(`【${acc.name} | ${acc.site}】: ✅ ${result.value}`);
     } else {
