@@ -12,7 +12,7 @@ const sites = {
       "X-Requested-With": "XMLHttpRequest",
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-      Cookie: cookie
+      Cookie: cookie,
     }),
     successCode: "0",
     parseResult: async (res) => {
@@ -21,7 +21,7 @@ const sites = {
       return json.message === "今天已经签过啦！"
         ? { ok: true, msg: json.message }
         : { ok: false, msg: json.message };
-    }
+    },
   },
 
   binmt: {
@@ -35,17 +35,30 @@ const sites = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
       "X-Requested-With": "XMLHttpRequest",
       Referer: "https://bbs.binmt.cc/k_misign-sign.html",
-      Cookie: cookie
+      Cookie: cookie,
     }),
     parseResult: async (res) => {
       const text = await res.text();
-      // 如果返回 HTML，则 Cookie 可能无效
+      console.log(`【MT签到返回】: ${text}`);
       if (text.startsWith("<")) {
+        // 尝试从 HTML 中提取提示
+        const match = text.match(
+          /<div[^>]*class="bm_c"[^>]*>([\s\S]*?)<\/div>/i
+        );
+        if (match && match[1]) {
+          const msg = match[1].trim();
+          if (msg.includes("已签到") || msg.includes("今天已经签过")) {
+            return { ok: true, msg };
+          } else {
+            return { ok: false, msg };
+          }
+        }
         return {
           ok: false,
-          msg: "返回 HTML 页面，Cookie 失效或未登录"
+          msg: "返回 HTML 页面，Cookie 失效或未登录",
         };
       }
+
       try {
         const json = JSON.parse(text);
         if (json.status === 0) return { ok: true, msg: json.msg };
@@ -54,8 +67,8 @@ const sites = {
       } catch (err) {
         return { ok: false, msg: "返回内容无法解析为 JSON" };
       }
-    }
-  }
+    },
+  },
 };
 
 // =======================
@@ -75,13 +88,13 @@ async function checkIn(account, siteKey) {
   if (siteCfg.preUrl) {
     await fetch(siteCfg.preUrl, {
       method: "GET",
-      headers: siteCfg.headers(account.cookie)
+      headers: siteCfg.headers(account.cookie),
     });
   }
 
   const response = await fetch(siteCfg.signUrl, {
     method: siteCfg.method,
-    headers: siteCfg.headers(account.cookie)
+    headers: siteCfg.headers(account.cookie),
   });
 
   if (!response.ok) {
@@ -127,7 +140,7 @@ async function main() {
 
   const tasks = [
     ...hifitiAccounts.map((acc) => checkIn(acc, "hifiti")),
-    ...mtAccounts.map((acc) => checkIn(acc, "binmt"))
+    ...mtAccounts.map((acc) => checkIn(acc, "binmt")),
   ];
 
   if (tasks.length === 0) {
@@ -140,14 +153,19 @@ async function main() {
   console.log(`\n======== 签到结果 ========\n`);
   let hasError = false;
 
-  let allAccounts = [...hifitiAccounts.map(a => ({...a, site:'hifiti'})), ...mtAccounts.map(a => ({...a, site:'binmt'}))];
+  let allAccounts = [
+    ...hifitiAccounts.map((a) => ({ ...a, site: "hifiti" })),
+    ...mtAccounts.map((a) => ({ ...a, site: "binmt" })),
+  ];
 
   results.forEach((result, index) => {
     const acc = allAccounts[index];
     if (result.status === "fulfilled") {
       console.log(`【${acc.name} | ${acc.site}】: ✅ ${result.value}`);
     } else {
-      console.error(`【${acc.name} | ${acc.site}】: ❌ ${result.reason.message}`);
+      console.error(
+        `【${acc.name} | ${acc.site}】: ❌ ${result.reason.message}`
+      );
       hasError = true;
     }
   });
